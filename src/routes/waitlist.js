@@ -76,4 +76,70 @@ router.get("/all", async (req, res) => {
   }
 });
 
+router.post("/bulk-upload", async (req, res) => {
+  try {
+    const users = req.body;
+
+    if (!Array.isArray(users)) {
+      return res.status(400).json({ message: "Expected an array" });
+    }
+
+    const emailSet = new Set();
+    const formattedUsers = [];
+
+    for (const user of users) {
+      // 1. Local Duplicate Check (prevents duplicates within the same file)
+      const cleanEmail = user.email ? user.email.toLowerCase().trim() : null;
+      if (!cleanEmail || emailSet.has(cleanEmail)) continue;
+
+      emailSet.add(cleanEmail);
+
+      let interestsObj = {};
+      try {
+        interestsObj = typeof user.interests === "string" 
+          ? JSON.parse(user.interests) 
+          : (user.interests || {});
+      } catch (e) {
+        interestsObj = {}; // Fallback if JSON string is malformed
+      }
+
+      formattedUsers.push({
+        name: user.name,
+        email: cleanEmail,
+        interests: {
+          updates: interestsObj.updates ?? true,
+          earlyAccess: interestsObj.earlyAccess ?? true,
+          exclusivePerks: interestsObj.exclusivePerks ?? true,
+        },
+      });
+    }
+
+    // 2. Database Insertion with { ordered: false }
+    // This allows valid users to be saved even if others are duplicates.
+    const result = await Waitlist.insertMany(formattedUsers, { ordered: false });
+
+    res.status(201).json({
+      message: "Waitlist uploaded successfully",
+      received: users.length,
+      inserted: result.length,
+    });
+
+  } catch (error) {
+    // 3. Handle Duplicate Key Errors specifically
+    if (error.code === 11000 || error.name === "BulkWriteError") {
+      return res.status(201).json({
+        message: "Upload completed with some duplicates skipped",
+        inserted: error.result ? error.result.nInserted : "Partial",
+        note: "Some emails already existed in the database."
+      });
+    }
+
+    console.error("Upload Error:", error);
+    res.status(500).json({
+      message: "Bulk upload failed",
+      error: error.message,
+    });
+  }
+});
+
 module.exports = router;
