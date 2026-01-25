@@ -195,115 +195,158 @@ carpenterAuthRouter.patch(
  * Essential for profile page and session refreshes
  */
 carpenterAuthRouter.get("/profile/:id", async (req, res) => {
-    console.log("🚀 [GET /profile/:id] Request received");
-  
-    const { id } = req.params;
-    const { productionOrderId } = req.query;
-  
-    console.log("📥 Params:", req.params);
-    console.log("📥 Query:", req.query);
-  
-    try {
-      // ---------------------------
-      // 1️⃣ Fetch Carpenter
-      // ---------------------------
-      console.log("🗄️ Fetching carpenter...");
-  
-      const carpenter = await Carpenter.findById(id)
-        .select("-otp")
-        .populate("productionOrders");
-  
-      if (!carpenter) {
-        console.warn("⚠️ Carpenter not found:", id);
-        return res.status(404).json({
-          success: false,
-          message: "Carpenter profile not found",
-        });
-      }
-  
-      console.log("✅ Carpenter found:", carpenter.fullName);
-  
-      // ---------------------------
-      // 2️⃣ If NO productionOrderId
-      // ---------------------------
-      if (!productionOrderId) {
-        console.log("ℹ️ No productionOrderId supplied");
-  
-        return res.status(200).json({
-          success: true,
-          carpenter,
-          productionOrder: null,
-        });
-      }
-  
-      // ---------------------------
-      // 3️⃣ Fetch Production Order
-      // ---------------------------
-      console.log("🗄️ Fetching production order:", productionOrderId);
-  
-      const productionOrder = await ProductionOrder.findById(productionOrderId)
-        .populate("user")
-        .populate("assignedCarpenters")
-        .populate("assignedDrivers")
-        .populate("assignedSuppliers")
-        .populate("assignedDesigners");
-  
-      if (!productionOrder) {
-        console.warn("⚠️ Production order not found");
-        return res.status(404).json({
-          success: false,
-          message: "Production order not found",
-        });
-      }
-  
-      // ---------------------------
-      // 4️⃣ Verify Carpenter Assigned
-      // ---------------------------
-      const isAssigned = productionOrder.assignedCarpenters.some(
-        (c) => c._id.toString() === id
-      );
-  
-      if (!isAssigned) {
-        console.warn("⛔ Carpenter not assigned to this order");
-  
-        return res.status(403).json({
-          success: false,
-          message: "Carpenter not assigned to this production order",
-        });
-      }
-  
-      console.log("✅ Carpenter assigned to order");
-  
-      // ---------------------------
-      // 5️⃣ Success Response
-      // ---------------------------
+  console.log("🚀 [GET /profile/:id] Request received");
+
+  const { id } = req.params;
+  const { productionOrderId } = req.query;
+
+  console.log("📥 Params:", req.params);
+  console.log("📥 Query:", req.query);
+
+  try {
+    // ---------------------------
+    // 1️⃣ Fetch Carpenter
+    // ---------------------------
+    console.log("🗄️ Fetching carpenter...");
+
+    const carpenter = await Carpenter.findById(id)
+      .select("-otp")
+      .populate("productionOrders");
+
+    if (!carpenter) {
+      console.warn("⚠️ Carpenter not found:", id);
+      return res.status(404).json({
+        success: false,
+        message: "Carpenter profile not found",
+      });
+    }
+
+    console.log("✅ Carpenter found:", carpenter.fullName);
+
+    // ---------------------------
+    // 2️⃣ If NO productionOrderId
+    // ---------------------------
+    if (!productionOrderId) {
+      console.log("ℹ️ No productionOrderId supplied");
+
       return res.status(200).json({
         success: true,
         carpenter,
-        productionOrder,
-      });
-  
-    } catch (err) {
-      console.error("🔥 ERROR:", err);
-      return res.status(500).json({
-        success: false,
-        error: err.message,
+        productionOrder: null,
       });
     }
-  });
+
+    // ---------------------------
+    // 3️⃣ Fetch Production Order
+    // ---------------------------
+    console.log("🗄️ Fetching production order:", productionOrderId);
+
+    const productionOrder = await ProductionOrder.findById(productionOrderId)
+      .populate("user")
+      .populate("assignedCarpenters")
+      .populate("assignedDrivers")
+      .populate("assignedSuppliers")
+      .populate("assignedDesigners");
+
+    if (!productionOrder) {
+      console.warn("⚠️ Production order not found");
+      return res.status(404).json({
+        success: false,
+        message: "Production order not found",
+      });
+    }
+
+    // ---------------------------
+    // 4️⃣ Verify Carpenter Assigned
+    // ---------------------------
+    const isAssigned = productionOrder.assignedCarpenters.some(
+      (c) => c._id.toString() === id
+    );
+
+    if (!isAssigned) {
+      console.warn("⛔ Carpenter not assigned to this order");
+
+      return res.status(403).json({
+        success: false,
+        message: "Carpenter not assigned to this production order",
+      });
+    }
+
+    console.log("✅ Carpenter assigned to order");
+
+    // ---------------------------
+    // 5️⃣ Success Response
+    // ---------------------------
+    return res.status(200).json({
+      success: true,
+      carpenter,
+      productionOrder,
+    });
+  } catch (err) {
+    console.error("🔥 ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
 
 // 5. FETCH FULL DASHBOARD DATA (Earnings + Jobs + Ratings)
 carpenterAuthRouter.get("/dashboard/:id", async (req, res) => {
   try {
-    const carpenter = await Carpenter.findById(req.params.id).select("-otp");
-    if (!carpenter) return res.status(404).json({ message: "Not found." });
+    // 1. Fetch and populate orders
+    const carpenter = await Carpenter.findById(req.params.id)
+      .select("-otp")
+      .populate({
+        path: "productionOrders",
+        select: "orderId items status createdAt totalAmount carpenterShare",
+      });
+
+    if (!carpenter) {
+      return res.status(404).json({
+        success: false,
+        message: "Carpenter workshop not found.",
+      });
+    }
+
+    const carpenterData = carpenter.toObject();
+
+    // 2. Calculate Financial Summary dynamically if needed
+    // Assuming 'pending' status orders count toward pendingEarnings
+    // and 'completed' orders count toward totalEarned (Wallet)
+    const pendingAmount = carpenterData.productionOrders
+      .filter(
+        (order) => order.status !== "completed" && order.status !== "delivered"
+      )
+      .reduce((acc, order) => acc + (order.carpenterShare || 0), 0);
+
+    const withdrawableAmount = carpenterData.earnings?.totalEarned || 0;
+    const responseData = {
+      ...carpenterData,
+      assignedJobs: carpenterData.productionOrders || [],
+      earnings: {
+        ...carpenterData.earnings,
+        pendingEarnings:
+          pendingAmount || carpenterData.earnings?.pendingEarnings || 0,
+        totalEarned: withdrawableAmount,
+        withdrawable: withdrawableAmount, 
+      },
+    };
+
+    console.log(
+      `💰 Financial Sync for ${carpenter.carpenterId}: Wallet(₦${withdrawableAmount}) | Pending(₦${pendingAmount})`
+    );
 
     res.status(200).json({
       success: true,
-      data: carpenter,
+      data: responseData,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("🔥 Dashboard Fetch Error:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
   }
 });
 
