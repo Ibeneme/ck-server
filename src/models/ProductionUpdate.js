@@ -1,8 +1,7 @@
 const mongoose = require("mongoose");
 
 const CommentSchema = new mongoose.Schema({
-  user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  userName: { type: String, required: true }, // Cached for quick display
+  userName: { type: String, required: true },
   text: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
 });
@@ -13,15 +12,12 @@ const ProductionUpdateSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "ProductionOrder",
       required: true,
-      index: true,
     },
-    adminName: { type: String, required: true, default: "Workshop Lead" },
+    adminName: { type: String, required: true },
     title: { type: String, required: true },
     text: { type: String, required: true },
-    image: { type: String }, // The Backblaze URL
-
-    // Social features
-    likes: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    images: [{ type: String }], // Array for multiple Backblaze URLs
+    likes: [], // Simple array of strings (usernames)
     comments: [CommentSchema],
   },
   { timestamps: true }

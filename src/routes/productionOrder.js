@@ -21,7 +21,7 @@ router.post("/", verifyToken, async (req, res) => {
       totalCostNGN,
       duration,
       explanation,
-      imageUrls,        // ✅ multiple images
+      imageUrls, // ✅ multiple images
       isInstalment,
     } = req.body;
 
@@ -66,7 +66,7 @@ router.post("/", verifyToken, async (req, res) => {
       // Remove non-strings & empty values
       validatedImages = imageUrls
         .filter((url) => typeof url === "string" && url.trim() !== "")
-        .slice(0, 5); // ✅ max 5 images
+        .slice(0, 5);
     }
 
     /* ───────── CREATE ORDER ───────── */
@@ -81,7 +81,7 @@ router.post("/", verifyToken, async (req, res) => {
       duration: duration || "N/A",
       explanation: explanation || "CloneKraft AI estimated pricing",
 
-      imageUrls: validatedImages, // ✅ stored safely
+      imageUrls: validatedImages,
 
       status: "pending",
       paymentStatus: "pending",

@@ -186,12 +186,12 @@ router.patch("/update-status/:id", async (req, res) => {
 
     if (status === "completed") {
       // Optional: Prevent completion if money is still owed
-      if (order.balanceRemaining > 0) {
-        return res.status(400).json({
-          success: false,
-          message: `Cannot complete order. Outstanding balance: ₦${order.balanceRemaining.toLocaleString()}`,
-        });
-      }
+      // if (order.balanceRemaining > 0) {
+      //   return res.status(400).json({
+      //     success: false,
+      //     message: `Cannot complete order. Outstanding balance: ₦${order.balanceRemaining.toLocaleString()}`,
+      //   });
+      // }
 
       // Add completion metadata
       updateFields.completedAt = new Date();
