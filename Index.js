@@ -15,12 +15,12 @@ const app = express();
 const submissionID = require("./src/routes/Interior_Designer/Submission_Routes");
 const authID = require("./src/routes/Interior_Designer/Auth_Routes");
 const projectID = require("./src/routes/Interior_Designer/projects");
-const partners = require('./src/routes/Partners/Partners')
-const carpentersID = require('./src/routes/Carpenters/Carpenter')
-const waitlist = require('./src/routes/waitlist')
-const admin = require('./src/routes/Admin/Admin')
-const adminData = require('./src/routes/Admin/AdminData')
-
+const partners = require("./src/routes/Partners/Partners");
+const carpentersID = require("./src/routes/Carpenters/Carpenter");
+const waitlist = require("./src/routes/waitlist");
+const admin = require("./src/routes/Admin/Admin");
+const adminData = require("./src/routes/Admin/AdminData");
+const authCrp = require("./src/routes/Carpenters/Carpenter_Auth");
 
 app.use(cors());
 app.use(express.json());
@@ -48,8 +48,8 @@ app.use("/api/v1/carpenters", carpentersID);
 app.use("/api/v1/waitlist", waitlist);
 app.use("/api/v1/admin", admin);
 app.use("/api/v1/admin/data", adminData);
+app.use("/api/v1/auth/carpenter", authCrp);
 
-//adminData
 app.get("/", (req, res) => {
   res.send("CloneKraft API running 🚀");
 });
@@ -61,7 +61,6 @@ app.get("/api/test", (req, res) => {
   });
 });
 
-// ── Database & Server Start ──
 const PORT = process.env.PORT || 5006;
 
 const startServer = async () => {

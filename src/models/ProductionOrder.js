@@ -13,6 +13,36 @@ const ProductionItemSchema = new mongoose.Schema(
 
 const ProductionOrderSchema = new mongoose.Schema(
   {
+    assignedCarpenters: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Carpenter",
+      },
+    ],
+    // --- 🆕 LOGISTICS TEAM (ALL ARRAYS) ---
+    assignedDrivers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Driver",
+      },
+    ],
+    assignedSuppliers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Supplier",
+      },
+    ],
+    assignedDesigners: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "InteriorDesigner",
+      },
+    ],
+    orderId: {
+      type: String,
+      unique: true,
+      sparse: true, // Allows nulls for existing records until updated
+    },
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     deliveryAddress: { type: String, required: true },
 
@@ -48,7 +78,6 @@ const ProductionOrderSchema = new mongoose.Schema(
     explanation: { type: String },
     currency: { type: String, default: "NGN" },
 
-    // ───── INSTALLMENT FIELDS ─────
     isInstalment: { type: Boolean, default: false },
     amountPaid: { type: Number, default: 0 },
     balanceRemaining: { type: Number, default: 0 },

@@ -1,42 +1,50 @@
 const express = require("express");
 const router = express.Router();
-const {
-  Submission,
-  DesignerUser,
-} = require("../../models/Interior_Designer/DesignerUser");
 const multer = require("multer");
-const upload = multer({ dest: "uploads/" });
+const InteriorDesigner = require("../../models/Interior_Designer/InteriorDesigner"); // Unified Model
+const { uploadToBackblaze } = require("../../utils/uploadToBackblaze");
 
-// [POST] Submit new application
-// [POST] Submit new application
+// Using memoryStorage to pipe directly to Backblaze
+const upload = multer({ storage: multer.memoryStorage() });
+
 router.post("/submit-application", upload.single("logo"), async (req, res) => {
   try {
-    const b = req.body; // 'b' represents the flat fields from your React form
+    const b = req.body;
+    console.log("📝 Processing new application for:", b.email);
 
-    // Manually map flat fields to the nested Schema structure
+    // Upload logo to Backblaze if provided
+    let logoUrl = null;
+    if (req.file) {
+      logoUrl = await uploadToBackblaze(
+        req.file.buffer,
+        req.file.originalname,
+        "designer-logos"
+      );
+    }
+
+    // Map flat form fields to the unified nested schema
     const structuredData = {
+      email: b.email.toLowerCase().trim(),
       brandIdentity: {
         contactName: b.contactName,
         brandName: b.brandName,
         isRegistered: b.registered === "Yes",
         registrationNumber: b.registrationNumber,
-        logoUrl: req.file ? req.file.path : null, // Handle the file from Multer
+        logoUrl: logoUrl,
       },
       contact: {
-        email: b.email,
         phone: b.phone,
         assistant: {
           name: b.assistantName,
           phone: b.assistantPhone,
-          email: b.assistantEmail,
-        }
+          email: b.assistantEmail ? b.assistantEmail.toLowerCase() : undefined,
+        },
       },
       logistics: {
         hasPhysicalOffice: b.hasPhysicalOffice === "Yes",
         address: b.officeAddress,
         city: b.officeCity,
         state: b.officeState,
-        country: b.officeCountry,
         operatingCity: b.operatingCity,
       },
       onlinePresence: {
@@ -48,65 +56,69 @@ router.post("/submit-application", upload.single("logo"), async (req, res) => {
         experienceYears: b.experience,
         budgetRange: b.budgetRange,
         projectVolume: b.projectVolume,
-      }
+      },
+      status: "pending", // Default status for new applicants
     };
 
-    // Use the mapped object instead of req.body
-    const submission = await Submission.create(structuredData);
+    const designer = await InteriorDesigner.create(structuredData);
 
     res.status(201).json({
       success: true,
-      message: "Application submitted successfully",
-      data: submission,
+      message:
+        "Application received. Our team will review your profile shortly.",
+      data: designer,
     });
   } catch (err) {
-    console.error("❌ DB Validation Error:", err.message);
+    console.error("❌ Submission Error:", err.message);
+    // Handle duplicate email error (MongoDB code 11000)
+    if (err.code === 11000) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "An application with this email already exists.",
+        });
+    }
     res.status(400).json({ success: false, error: err.message });
   }
 });
-// [PATCH] Approve/Reject Application (Admin Only)
-router.patch("/admin/evaluate/:id", async (req, res) => {
-  const { decision } = req.body;
-  const submissionId = req.params.id;
 
-  console.log(`--- Evaluating Submission: ${submissionId} ---`);
-  console.log(`Decision: ${decision}`);
+/**
+ * 2. ADMIN: EVALUATE APPLICATION
+ * Simply updates the status of the unified document.
+ */
+router.patch("/admin/evaluate/:id", async (req, res) => {
+  const { decision } = req.body; // "approved" or "rejected"
+  const designerId = req.params.id;
 
   try {
-    const sub = await Submission.findById(submissionId);
+    const designer = await InteriorDesigner.findById(designerId);
 
-    if (!sub) {
-      console.warn(`⚠️ Submission ${submissionId} not found in database.`);
-      return res.status(404).json({ message: "Submission not found" });
+    if (!designer) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Designer record not found" });
     }
 
-    console.log("Found Submission for:", sub.contact.email);
+    // Update status
+    designer.status = decision;
 
-    sub.status = decision;
-    await sub.save();
-    console.log(`Status updated to: ${sub.status}`);
-
+    // If approved, ensure account is active
     if (decision === "approved") {
-      console.log("🚀 Creating/Updating DesignerUser account...");
-
-      const updatedUser = await DesignerUser.findOneAndUpdate(
-        { email: sub.contact.email },
-        {
-          email: sub.contact.email,
-          brandName: sub.brandIdentity.brandName,
-          logoUrl: sub.brandIdentity.logoUrl,
-          isActive: true,
-        },
-        { upsert: true, new: true }
-      );
-
-      console.log("✅ Designer Profile Synced:", updatedUser.email);
+      designer.isActive = true;
     }
 
-    res.json({ success: true, message: `Application ${decision}` });
+    await designer.save();
+    console.log(`✅ Designer ${designer.email} set to: ${decision}`);
+
+    res.json({
+      success: true,
+      message: `Application has been ${decision}`,
+      data: { status: designer.status },
+    });
   } catch (err) {
-    console.error("❌ Evaluation Route Error:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Evaluation Error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
