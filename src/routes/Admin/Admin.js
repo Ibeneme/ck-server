@@ -60,8 +60,6 @@ const formatFullName = (name) => {
   console.log("📝 Fullname formatted:", formatted);
   return formatted;
 };
-
-// --- PUBLIC AUTH: SEND OTP ---
 router.post("/send-otp", async (req, res) => {
   const { fullname, email } = req.body;
   console.log("📨 Sending OTP to:", email, "Name:", fullname);
@@ -69,25 +67,65 @@ router.post("/send-otp", async (req, res) => {
   const sanitizedEmail = email.toLowerCase().trim();
   const sanitizedName = formatFullName(fullname);
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  console.log("🔢 Generated OTP:", otp);
 
   try {
+    // 1. Remove { upsert: true }. 
+    // This will now return null if the email is not found.
     const updatedAdmin = await Admin.findOneAndUpdate(
       { email: sanitizedEmail },
       { fullname: sanitizedName, otp, otpExpires: Date.now() + 600000 },
-      { upsert: true, new: true }
+      { new: true } 
     );
-    console.log("✅ Admin record updated/created:", updatedAdmin);
 
+    // 2. Check if the admin exists
+    if (!updatedAdmin) {
+      console.log("🚫 Login Blocked: Email not found in Admin list:", sanitizedEmail);
+      return res.status(403).json({ 
+        success: false, 
+        message: "Access denied. This email is not authorized as an admin." 
+      });
+    }
+
+    console.log("✅ Admin found, OTP stored:", updatedAdmin.email);
+
+    // 3. Only send the email if the user is authorized
     await sendEmail({ to: sanitizedEmail, otp, purpose: "verification" });
-    console.log("✉️ OTP sent via email");
-
+    
     res.status(200).json({ success: true, message: "OTP sent to email!" });
   } catch (err) {
     console.error("❌ Error sending OTP:", err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+
+// --- PUBLIC AUTH: SEND OTP ---
+// router.post("/send-otp", async (req, res) => {
+//   const { fullname, email } = req.body;
+//   console.log("📨 Sending OTP to:", email, "Name:", fullname);
+
+//   const sanitizedEmail = email.toLowerCase().trim();
+//   const sanitizedName = formatFullName(fullname);
+//   const otp = Math.floor(100000 + Math.random() * 900000).toString();
+//   console.log("🔢 Generated OTP:", otp);
+
+//   try {
+//     const updatedAdmin = await Admin.findOneAndUpdate(
+//       { email: sanitizedEmail },
+//       { fullname: sanitizedName, otp, otpExpires: Date.now() + 600000 },
+//       { upsert: true, new: true }
+//     );
+//     console.log("✅ Admin record updated/created:", updatedAdmin);
+
+//     await sendEmail({ to: sanitizedEmail, otp, purpose: "verification" });
+//     console.log("✉️ OTP sent via email");
+
+//     res.status(200).json({ success: true, message: "OTP sent to email!" });
+//   } catch (err) {
+//     console.error("❌ Error sending OTP:", err.message);
+//     res.status(500).json({ success: false, error: err.message });
+//   }
+// });
 
 // --- PUBLIC AUTH: VERIFY OTP ---
 router.post("/verify-otp", async (req, res) => {
