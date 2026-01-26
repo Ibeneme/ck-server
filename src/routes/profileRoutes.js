@@ -3,6 +3,7 @@ const router = express.Router();
 const verifyToken = require("../utils/verifyToken");
 const profileController = require("../controllers/profileController");
 const upload = require("../middlewares/upload");
+const User = require("../models/User");
 
 /**
  * 👤 PROFILE ROUTES
