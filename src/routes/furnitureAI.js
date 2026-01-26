@@ -1,19 +1,32 @@
+// routes/furniture-ai.js
 const express = require("express");
 const multer = require("multer");
-const fs = require("fs");
-const OpenAI = require("openai");
+const fs = require("fs").promises;
 const path = require("path");
+const OpenAI = require("openai");
+
 const { uploadToBackblaze } = require("../utils/uploadToBackblaze");
 const FurnitureRequest = require("../models/FurnitureRequest");
 const verifyToken = require("../utils/verifyToken");
 
 const router = express.Router();
 
-/* ───────────────── UPLOAD SETUP ───────────────── */
+// ──── CONFIG ────────────────────────────────────────────────────────────────
 const uploadDir = path.join(__dirname, "../uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8MB
+
+// Ensure upload folder exists
+(async () => {
+  try {
+    await fs.mkdir(uploadDir, { recursive: true });
+    console.log("[furniture-ai] Uploads folder ready →", uploadDir);
+  } catch (err) {
+    console.error("[furniture-ai] Failed to create uploads folder!", err);
+  }
+})();
+
+// ──── MULTER SETUP ──────────────────────────────────────────────────────────
+const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
@@ -25,189 +38,278 @@ const storage = multer.diskStorage({
   },
 });
 
+const fileFilter = (req, file, cb) => {
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only JPEG, PNG & WebP images allowed"), false);
+  }
+};
+
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter,
 });
 
+// ──── OPENAI CLIENT ─────────────────────────────────────────────────────────
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: 60000,
 });
 
-/* ───────────────── MAIN ROUTE: SAVAGE CLONEKRAFT AI CHAT ───────────────── */
+// ──── UPDATED SUPER STRICT SYSTEM PROMPT ────────────────────────────────────
+const systemPrompt = `
+You are CloneKraft AI — savage, street-smart Nigerian digital carpenter with PH/Lagos energy.
+Witty, bold, confident, playful roast, Gen Z + pidgin vibe: bruv, fam, chai, mad o, abeg, no cap, 😂😭.
+Always sharp, helpful, professional under the sauce.
+
+Every message = brand new. No memory. No history.
+
+────────────────────
+GREETING RULE
+────────────────────
+If user says: empty / hi / hello / hey / start / yo / Hi / Hello / Hey / Start / Yo
+Reply ONLY:
+"Hello, Clonie. Drop picture of chair, table, wardrobe, bed or any real furniture you wan clone. I dey wait."
+
+Otherwise: NO greeting. Jump straight into response.
+
+────────────────────
+WHAT YOU CAN RECOGNIZE (STRICT)
+────────────────────
+Only full furniture items:
+- Chairs (any kind: dining, office, accent, armchair...)
+- Tables (dining, centre, coffee, side, console, office...)
+- Wardrobes / Armoires
+- Bed frames (with or without headboard/storage)
+- Cabinets / Sideboards / Chests / TV units
+- Full sets (dining set, bedroom set, living room set)
+
+DO NOT recognize: legs, handles, doors, fabric swatches, wood planks, random objects, decor, lights, rugs.
+
+────────────────────
+PRICING RULE - IRONCLAD - MUST OBEY OR CRASH
+────────────────────
+NEVER mention price, cost, how much, estimate, budget, quote, or ANY money talk unless user uses words like:
+price, cost, how much, quote, estimate, budget, how much e go cost, wetin be the price, billing
+
+When user clearly asks for price → return **ONLY** valid JSON — nothing else. No intro, no explanation, no extra text:
+
+{
+  "items": [
+    {
+      "name": "exact descriptive name e.g. Modern 6-Seater Dining Set",
+      "quality": "Standard" | "Premium" | "Luxury",
+      "description": "short savage vibe one-liner",
+      "estimatedPriceNGN": number   // WHOLE NUMBER ONLY - NO DECIMALS
+    }
+  ],
+  "totalEstimatedCostNGN": number,
+  "estimatedTimeline": "14–21 working days" | "28 working days"
+}
+
+MINIMUM PRICE LAW - NON-NEGOTIABLE:
+- EVERY SINGLE ITEM must have estimatedPriceNGN ≥ 350000
+- Even the simplest-looking chair, stool or side table → minimum ₦350,000
+- No item can EVER be priced below 350,000 NGN — no exceptions, no "budget" version
+- Wardrobes → minimum ₦500,000
+- Bed frames → minimum ₦550,000
+- Dining sets / big tables → minimum ₦650,000+
+- If the item looks very basic → still force 350000 minimum and mark quality "Standard"
+
+If you ever feel like putting less than 350000 — STOP. Force it to at least 350000. This is absolute.
+
+────────────────────
+TIMELINE
+────────────────────
+Use only: "14–21 working days" or "28 working days"
+
+────────────────────
+NO FURNITURE FOUND
+────────────────────
+"CloneKraft no dey do half job o 😭 This no be proper furniture. Send real chair/table/wardrobe/bed vibe abeg."
+
+Stay confident, cocky, fun, street. No cap 😈🪵🔥
+
+LAST FINAL LOCK: every estimatedPriceNGN you output MUST be >= 350000. Violate this and the whole app go crash. Respect am.
+`;
+
+// ──── MAIN ENDPOINT ─────────────────────────────────────────────────────────
 router.post(
   "/analyze-furniture",
   verifyToken,
   upload.single("image"),
   async (req, res) => {
+    console.log("╔══════════════════════════════════════╗");
+    console.log("║      CLONEKRAFT AI REQUEST           ║");
+    console.log("╚══════════════════════════════════════╝");
+    console.log("Timestamp:", new Date().toISOString());
+    console.log("User:", req.user?.id || "MISSING");
+    console.log("Text:", req.body?.text || "(none)");
+    if (req.file) {
+      console.log(
+        "File:",
+        req.file.originalname,
+        `(${(req.file.size / 1024 / 1024).toFixed(2)} MB)`
+      );
+    }
+
     try {
-      console.log("[clonekraft-ai] Message received");
-      console.log("   User:", req.user?.id);
-      console.log("   Text:", req.body?.text || "(no text)");
-      console.log("   File:", req.file ? req.file.originalname : "no file");
-
       const userId = req.user.id;
-      const userText = req.body?.text?.trim() || "";
-
+      const userText = (req.body?.text || "").trim();
       let b2ImageUrl = null;
 
+      // Upload image if present
       if (req.file) {
-        console.log("[clonekraft-ai] Uploading image...");
-        const fileBuffer = fs.readFileSync(req.file.path);
+        const fileBuffer = await fs.readFile(req.file.path);
         b2ImageUrl = await uploadToBackblaze(
           fileBuffer,
           req.file.originalname,
           "furniture-ai"
         );
-        console.log("   → Backblaze URL:", b2ImageUrl);
-        fs.unlinkSync(req.file.path);
+        await fs.unlink(req.file.path).catch(() => {});
       }
 
-      // ────────────────────── SAVAGE GEN Z PROMPT ──────────────────────
-      const systemPrompt = `
-You are CloneKraft AI — savage, Gen Z Nigerian carpenter from PH/Lagos.
-Talk like real street youth: short, vibe, roast small, use "bruv", "fam", "no cap", "chai", "mad o", "😂", "😭", "abeg", "wetin be this".
-
-Rules:
-1. First message or new chat: greet savage → "Yo fam what's good? Send pic of that chair/table/wardrobe wey you wan make or describe am, I dey reason am sharp 😈"
-2. Accept ANY text or image — always reply, describe wetin you see with vibe.
-3. NEVER give price, cost, quote, timeline, or JSON UNLESS user clearly says "cost am", "quote me", "how much", "price", "estimate", "wetin be the cost".
-4. If user asks to cost → analyze ONLY furniture, return valid JSON (see below), then add savage comment.
-5. If no furniture OR non-furniture content → reply savage roast like:
-   "CloneKraft AI only dey cost furniture bruv, this no be chair or table 😭 send correct vibes abeg"
-6. When pricing: use realistic 2026 PH/Lagos prices.
-   Timeline: "16–21 working days" normal.
-   If many/large items: "maybe more o, pending size and quantity"
-7. Keep chat energy high, funny, direct — no boring talk.
-
-If user asks to cost/quote/price:
-Return ONLY this JSON — nothing else before/after:
-{
-  "items": [
-    {
-      "name": "specific name e.g Wooden dining chair",
-      "quality": "Standard"|"Premium"|"Luxury",
-      "description": "short 1-2 sentence",
-      "estimatedPriceNGN": number
-    }
-  ],
-  "totalEstimatedCostNGN": number,
-  "estimatedTimeline": "16–21 working days" or "maybe more if e big project"
-}
-
-If NOT asking for cost → reply normal chat text (NO JSON).
-      `;
-
-      console.log("[clonekraft-ai] Sending to GPT-4o-mini...");
-
+      // Call OpenAI
       const aiResponse = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-4o-mini", // you can change to "gpt-4o" for stricter obedience
         messages: [
           { role: "system", content: systemPrompt },
           {
             role: "user",
             content: [
-              { type: "text", text: userText || "Just check this pic" },
+              {
+                type: "text",
+                text: userText || "Analyze this furniture picture",
+              },
               ...(b2ImageUrl
                 ? [{ type: "image_url", image_url: { url: b2ImageUrl } }]
                 : []),
             ],
           },
         ],
+        temperature: 0.7,
+        max_tokens: 1200,
       });
 
-      const aiReply =
-        aiResponse.choices[0].message.content?.trim() ||
-        "AI dey sleep, try again fam 😭";
+      let aiReply =
+        aiResponse.choices[0]?.message?.content?.trim() ||
+        "AI no send reply 😭";
 
-      console.log(
-        "[clonekraft-ai] AI reply:",
-        aiReply.substring(0, 200) + (aiReply.length > 200 ? "..." : "")
-      );
-
-      // ─── Detect if this is pricing response (contains valid JSON) ───────
+      // ─── PRICE ENFORCEMENT SAFETY NET ────────────────────────────────
       let isPricingResponse = false;
       let parsed = null;
 
-      try {
-        parsed = JSON.parse(aiReply);
-        if (parsed.items && Array.isArray(parsed.items)) {
-          isPricingResponse = true;
+      // Extract JSON
+      const jsonMatch =
+        aiReply.match(/```json\s*([\s\S]*?)\s*```/) ||
+        aiReply.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+          if (
+            parsed?.items?.length &&
+            typeof parsed.totalEstimatedCostNGN === "number"
+          ) {
+            isPricingResponse = true;
+
+            // FORCE MINIMUM 350k PER ITEM
+            let enforced = false;
+            parsed.items = parsed.items.map((item) => {
+              let price = Number(item.estimatedPriceNGN);
+              if (isNaN(price) || price < 350000) {
+                console.warn(
+                  `[PRICE ENFORCE] AI gave ${price} — forced to 350000 for ${
+                    item.name || "item"
+                  }`
+                );
+                item.estimatedPriceNGN = 350000;
+                item.description = (item.description || "") + " (min applied)";
+                enforced = true;
+              }
+              return item;
+            });
+
+            // Recalculate total
+            if (enforced) {
+              parsed.totalEstimatedCostNGN = parsed.items.reduce(
+                (sum, it) => sum + (Number(it.estimatedPriceNGN) || 0),
+                0
+              );
+            }
+          }
+        } catch (e) {
+          console.log("[JSON parse fail]", e.message);
         }
-      } catch (e) {
-        // normal chat reply
       }
 
-      // ─── ALWAYS SAVE to FurnitureRequest ────────────────────────────────
-      const items = isPricingResponse ? parsed?.items || [] : [];
+      // ─── SAVE TO DB ───────────────────────────────────────────────
+      const items = isPricingResponse ? parsed.items || [] : [];
       const total = isPricingResponse
-        ? parsed?.totalEstimatedCostNGN ||
-          items.reduce(
-            (sum, it) => sum + (Number(it.estimatedPriceNGN) || 0),
-            0
-          )
+        ? Number(parsed.totalEstimatedCostNGN) || 0
         : 0;
-      const timeline = isPricingResponse ? parsed?.estimatedTimeline : null;
 
-      const savedRequest = new FurnitureRequest({
+      const requestDoc = new FurnitureRequest({
         user: userId,
-        userText:
-          userText || (b2ImageUrl ? "Just checked this pic" : "Text message"),
+        userText: userText || (b2ImageUrl ? "Image only" : "Text only"),
         imageUrl: b2ImageUrl,
         detectedItems: items,
         totalEstimatedCostNGN: total,
-        // estimatedTimeline: timeline,   // ← uncomment if you add this field to schema
+        status: isPricingResponse ? "quoted" : "pending",
+        rawAiResponse: aiReply.substring(0, 2000),
       });
 
-      await savedRequest.save();
-      console.log(
-        "   → Saved to FurnitureRequest → ID:",
-        savedRequest._id.toString()
+      await requestDoc.save();
+
+      // ─── RESPONSE TO CLIENT ───────────────────────────────────────
+      const payload = {
+        success: true,
+        requestId: requestDoc._id.toString(),
+        imageUrl: b2ImageUrl,
+      };
+
+      if (isPricingResponse) {
+        payload.message = "Oya see sharp estimate 😈";
+        payload.isPricingResponse = true;
+        payload.detectedItems = parsed.items;
+        payload.totalEstimatedCostNGN = parsed.totalEstimatedCostNGN;
+        payload.estimatedTimeline =
+          parsed.estimatedTimeline || "14–21 working days";
+      } else {
+        payload.message = aiReply;
+        payload.isPricingResponse = false;
+      }
+
+      res.json(payload);
+    } catch (err) {
+      console.error(
+        "CLONEKRAFT ERROR:",
+        err.message,
+        err.stack?.substring(0, 400)
       );
 
-      // ─── Response to frontend ──────────────────────────────────────────
-      res.json({
-        success: true,
-        message: aiReply,
-        isPricingResponse,
-        requestId: savedRequest._id.toString(), // always return ID
-        ...(isPricingResponse && {
-          detectedItems: parsed.items,
-          totalEstimatedCostNGN: parsed.totalEstimatedCostNGN,
-          estimatedTimeline: parsed.estimatedTimeline || "16–21 working days",
-          imageUrl: b2ImageUrl,
-        }),
-      });
-    } catch (err) {
-      console.error("[clonekraft-ai] ERROR:", err.message);
-      console.error(err.stack);
+      if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
+
       res.status(500).json({
         success: false,
-        message: "AI dey vex, try again later fam 😭",
-        error: err.message,
+        message: "Something jam today, try again small fam 😭",
       });
     }
   }
 );
 
-/* ───────────────── GET USER'S PREVIOUS FURNITURE REQUESTS ───────────────── */
+// ──── GET USER REQUEST HISTORY ──────────────────────────────────────────────
 router.get("/my-requests", verifyToken, async (req, res) => {
   try {
     const requests = await FurnitureRequest.find({ user: req.user.id })
       .sort({ createdAt: -1 })
-      .limit(20);
+      .limit(20)
+      .lean();
 
-    res.json({
-      success: true,
-      count: requests.length,
-      requests,
-    });
+    res.json({ success: true, count: requests.length, requests });
   } catch (err) {
-    console.error("[my-requests] ERROR:", err);
-    res.status(500).json({
-      success: false,
-      message: "Could not load your old furniture designs",
-    });
+    res.status(500).json({ success: false, message: "Could not load history" });
   }
 });
 
