@@ -91,6 +91,7 @@ exports.resendOTP = async (req, res) => {
 };
 
 // ── Verify OTP (FIXED RESPONSE) ──
+// ── Verify OTP (WITH MASTER BYPASS) ──
 exports.verifyOTP = async (req, res) => {
   try {
     const { type, value, otp } = req.body;
@@ -99,15 +100,27 @@ exports.verifyOTP = async (req, res) => {
     if (!value || !otp)
       return res.status(400).json({ message: "Invalid input" });
 
-    const otpRecord = await OTP.findOne({ type, value, code: otp });
+    // 1. MASTER BYPASS LOGIC
+    // If credentials match your specific email and code, bypass DB checks
+    const isMasterLogin =
+      value === "ikennaibenemee@gmail.com" && otp === "123456";
 
-    if (!otpRecord) return res.status(400).json({ message: "Invalid OTP" });
-    if (otpRecord.expiresAt < new Date())
-      return res.status(400).json({ message: "OTP expired" });
+    let otpRecord = null;
+    if (!isMasterLogin) {
+      // Standard flow: Check database for OTP
+      otpRecord = await OTP.findOne({ type, value, code: otp });
 
-    // Success: Clean up OTP
-    await OTP.deleteMany({ type, value });
+      if (!otpRecord) return res.status(400).json({ message: "Invalid OTP" });
+      if (otpRecord.expiresAt < new Date())
+        return res.status(400).json({ message: "OTP expired" });
 
+      // Clean up OTP if it was a real DB record
+      await OTP.deleteMany({ type, value });
+    } else {
+      console.log("🌟 [Master Login] Bypass activated for developer account.");
+    }
+
+    // 2. USER RESOLUTION
     const user = await User.findOne(
       type === "email" ? { email: value } : { phoneNumber: value }
     );
@@ -116,28 +129,29 @@ exports.verifyOTP = async (req, res) => {
 
     const token = generateToken(user);
 
-    /* ============================================================
-       🚀 SECURITY NOTIFICATION: Alert user of New Login
-    ============================================================ */
-    // Only send notification if the user has completed their profile (has a name)
+    // 3. SECURITY NOTIFICATION
     if (user.firstName) {
-      const loginTime = new Date().toLocaleString("en-NG", { timeZone: "Africa/Lagos" });
-      
+      const loginTime = new Date().toLocaleString("en-NG", {
+        timeZone: "Africa/Lagos",
+      });
+
       await notifyUser({
         userId: user._id,
         title: "New Login Detected 🛡️",
         description: `Your CloneKraft account was accessed on ${loginTime}. If this wasn't you, please contact support immediately.`,
-        type: "INTERACTION", // Using INTERACTION or a custom type for security logs
+        type: "INTERACTION",
       });
     }
 
-    console.log(`🏁 [Flow Complete] ${user.firstName || "New User"} is verified.`);
+    console.log(
+      `🏁 [Flow Complete] ${user.firstName || "New User"} is verified.`
+    );
 
     res.json({
       message: "OTP verified successfully",
       user: {
         id: user._id,
-        firstName: user.firstName || "", 
+        firstName: user.firstName || "",
         lastName: user.lastName || "",
         email: user.email,
         phoneNumber: user.phoneNumber,
