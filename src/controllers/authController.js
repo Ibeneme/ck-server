@@ -103,7 +103,7 @@ exports.verifyOTP = async (req, res) => {
     // 1. MASTER BYPASS LOGIC
     // If credentials match your specific email and code, bypass DB checks
     const isMasterLogin =
-      value === "ikennaibenemee@gmail.com" && otp === "123456";
+      value === "ikennaibenemee@gmail.com" && otp === "1234";
 
     let otpRecord = null;
     if (!isMasterLogin) {
