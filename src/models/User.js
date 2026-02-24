@@ -4,30 +4,19 @@ const addressSchema = new mongoose.Schema({
   street: { type: String, trim: true },
   city: { type: String, trim: true },
   state: { type: String, trim: true },
-  country: { type: String, trim: true },
-  zipCode: { type: String, trim: true },
+  country: { type: String, default: "Nigeria", trim: true },
+  landmark: { type: String, trim: true }, // Added Landmark
 });
 
-// 🔔 Notification Preferences
 const notificationPreferencesSchema = new mongoose.Schema(
   {
-    push: {
-      type: Boolean,
-      default: true,
-    },
-    email: {
-      type: Boolean,
-      default: true,
-    },
-    sms: {
-      type: Boolean,
-      default: false,
-    },
+    push: { type: Boolean, default: true },
+    email: { type: Boolean, default: true },
+    sms: { type: Boolean, default: false },
   },
   { _id: false }
 );
 
-// ⚙️ User Preferences
 const preferencesSchema = new mongoose.Schema(
   {
     notifications: notificationPreferencesSchema,
@@ -37,10 +26,16 @@ const preferencesSchema = new mongoose.Schema(
 
 const userSchema = new mongoose.Schema(
   {
+    generatedImages: [
+      {
+        prompt: { type: String, required: true },
+        imageUrl: { type: String, required: true },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     verified: { type: Boolean, default: false },
     firstName: { type: String, trim: true },
     lastName: { type: String, trim: true },
-    username: { type: String, trim: true, unique: true, sparse: true },
     email: {
       type: String,
       unique: true,
@@ -48,20 +43,19 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
-    phoneNumber: { type: String, unique: true, sparse: true, trim: true },
+    phoneNumber: { type: String, unique: true, sparse: true, trim: true }, // Required for delivery
     profilePicture: { type: String, trim: true },
-    bio: { type: String, trim: true },
-    gender: {
-      type: String,
-      enum: ["male", "female", "other"],
-      default: "other",
-    },
-    dateOfBirth: { type: Date },
+
+    // Delivery Specifics
     address: addressSchema,
-    website: { type: String, trim: true },
-    // ✅ correct
+    contactMethod: {
+      type: String,
+      enum: ["WhatsApp", "Call", "SMS"],
+      default: "WhatsApp",
+    },
+    deliveryNotes: { type: String, trim: true },
+
     expoPushToken: { type: String },
-    // ✅ Preferences
     preferences: {
       type: preferencesSchema,
       default: () => ({}),

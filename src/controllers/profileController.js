@@ -2,7 +2,7 @@ const User = require("../models/User");
 const OTP = require("../models/OTP");
 const sendEmail = require("../utils/sendEmail");
 const { uploadToBackblaze } = require("../utils/uploadToBackblaze");
-
+const notifyUser = require("../utils/notifyUser");
 /**
  * 🔔 UPDATE PREFERENCES
  */
@@ -92,34 +92,55 @@ exports.getProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const user = req.user;
-    console.log("👤 [Profile] Updating profile for:", user?._id);
+    console.log(
+      "📦 [Profile] Updating delivery-focused profile for:",
+      user?._id
+    );
 
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const {
       firstName,
       lastName,
-      username,
-      bio,
-      gender,
-      dateOfBirth,
-      address,
-      website,
+      phoneNumber,
+      email,
+      address, // street, city, landmark, country
+      contactMethod,
+      deliveryNotes,
       profilePicture,
     } = req.body;
 
+    // Step 1: Personal Info
     if (firstName !== undefined) user.firstName = firstName;
     if (lastName !== undefined) user.lastName = lastName;
-    if (username !== undefined) user.username = username;
-    if (bio !== undefined) user.bio = bio;
-    if (gender !== undefined) user.gender = gender;
-    if (dateOfBirth !== undefined) user.dateOfBirth = dateOfBirth;
-    if (address !== undefined) user.address = address;
-    if (website !== undefined) user.website = website;
+    if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
+    if (email !== undefined) user.email = email;
     if (profilePicture !== undefined) user.profilePicture = profilePicture;
 
+    // Step 2: Delivery Address
+    if (address !== undefined) {
+      user.address = {
+        ...user.address,
+        ...address,
+      };
+    }
+
+    // Step 3: Delivery Preferences
+    if (contactMethod !== undefined) user.contactMethod = contactMethod;
+    if (deliveryNotes !== undefined) user.deliveryNotes = deliveryNotes;
+
     await user.save();
-    console.log("✅ [Profile] Save Successful");
+    console.log("✅ [Profile] Delivery info updated successfully");
+
+    /* ==========================================
+       🔔 NOTIFY USER OF PROFILE UPDATE
+    ========================================== */
+    notifyUser({
+      userId: user._id,
+      title: "Profile Updated",
+      description: "Your delivery information has been successfully updated.",
+      type: "PROFILE_UPDATE",
+    });
 
     res.json({
       message: "Profile updated successfully",
@@ -127,15 +148,12 @@ exports.updateProfile = async (req, res) => {
         id: user._id,
         firstName: user.firstName,
         lastName: user.lastName,
-        username: user.username,
         email: user.email,
         phoneNumber: user.phoneNumber,
         profilePicture: user.profilePicture,
-        bio: user.bio,
-        gender: user.gender,
-        dateOfBirth: user.dateOfBirth,
         address: user.address,
-        website: user.website,
+        contactMethod: user.contactMethod,
+        deliveryNotes: user.deliveryNotes,
       },
     });
   } catch (err) {

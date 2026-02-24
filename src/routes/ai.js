@@ -6,9 +6,7 @@ const verifyToken = require("../utils/verifyToken");
 const AIChat = require("../models/AIChat");
 const { uploadToBackblaze } = require("../utils/uploadToBackblaze");
 const router = express.Router();
-
-
-
+const axios = require("axios");
 /* ───────────────────────────────
    Multer setup
 ──────────────────────────────── */
@@ -25,27 +23,147 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-/* ───────────────────────────────
-   Helper: detect costing intent
-──────────────────────────────── */
-function isCostingMessage(text = "") {
-  const keywords = [
-    "cost",
-    "price",
-    "how much",
-    "estimate",
-    "budget",
-    "pricing",
-    "amount",
-    "naira",
-    "₦",
-    "worth",
-  ];
-  return keywords.some((k) => text.toLowerCase().includes(k));
+const HYBRID_SYSTEM_PROMPT = `
+You are Clonekraft AI — a Nigerian Master Carpenter and Sharp Analyst. 
+CRITICAL: You must always respond in valid JSON format.
+
+MODE 1: SALES CLOSER (Furniture)
+- If furniture is involved, follow the flow: Identify -> 3-5 preferences -> Build Summary -> Quote.
+- Quote Rule: 70% deposit via Paystack, 10-14 days timeline.
+- Tone: Humorous and direct ("looks like money without shouting").
+
+MODE 2: GPT ANALYST & WEB SEARCH
+- You can now browse the live web for URLs using your search tool.
+- You can analyze text provided from uploaded PDF or Word documents.
+- Answer any question regardless of category.
+
+JSON OUTPUT STRUCTURE:
+{
+  "explanation": "Text response for the user",
+  "generateImage": true/false,
+  "refinedPrompt": "Detailed DALL-E prompt if generating",
+  "costing": true/false,
+  "totalCostNGN": number,
+  "items": [{ "name": "string", "quantity": 1, "subtotalNGN": 0 }],
+  "analysis": "Analytical details for GPT mode"
 }
+`;
 
 router.post(
   "/chat",
+  verifyToken,
+  upload.array("images", 5),
+  async (req, res) => {
+    try {
+      const { message = "" } = req.body;
+      const user = req.user;
+      const files = req.files || [];
+      let extractedText = "";
+      const b2Urls = [];
+      const openAIImageContent = [];
+
+      // --- DOCUMENT & IMAGE PROCESSING ---
+      for (const file of files) {
+        // 1. Upload to Backblaze
+        const url = await uploadToBackblaze(
+          file.buffer,
+          file.originalname,
+          "chat-files"
+        );
+        b2Urls.push(url);
+
+        // 2. Extract content from Documents
+        if (file.mimetype === "application/pdf") {
+          const data = await pdf(file.buffer);
+          extractedText += `\n[PDF content]: ${data.text}`;
+        } else if (file.mimetype.includes("wordprocessingml")) {
+          const data = await mammoth.extractRawText({ buffer: file.buffer });
+          extractedText += `\n[Docx content]: ${data.value}`;
+        } else if (file.mimetype.startsWith("image/")) {
+          openAIImageContent.push({
+            type: "image_url",
+            image_url: {
+              url: `data:${file.mimetype};base64,${file.buffer.toString(
+                "base64"
+              )}`,
+            },
+          });
+        }
+      }
+
+      let chatHistory = await AIChat.findOne({ user: user._id });
+      const previousMessages = chatHistory
+        ? chatHistory.messages.slice(-8).map((m) => ({
+            role: m.role === "ai" ? "assistant" : "user",
+            content: m.content || "[Context]",
+          }))
+        : [];
+
+      // --- CALL SEARCH-ENABLED MODEL ---
+      // Using the Responses API with web_search_preview for live links
+      const completion = await openai.responses.create({
+        model: "gpt-4o-search-preview", // Updated for real-time web access
+        tools: [{ type: "web_search_preview" }],
+        instructions: HYBRID_SYSTEM_PROMPT,
+        input: `${message}\n${extractedText}`,
+        response_format: { type: "json_object" },
+      });
+
+      const parsed = JSON.parse(completion.output_text);
+
+      // --- IMAGE GENERATION ---
+      if (parsed.generateImage) {
+        const imgGen = await openai.images.generate({
+          model: "dall-e-3",
+          prompt: parsed.refinedPrompt,
+        });
+        const imgRes = await axios.get(imgGen.data[0].url, {
+          responseType: "arraybuffer",
+        });
+        const genUrl = await uploadToBackblaze(
+          Buffer.from(imgRes.data),
+          `gen_${Date.now()}.png`,
+          "gen-designs"
+        );
+        b2Urls.push(genUrl);
+      }
+
+      // --- DATABASE SAVE ---
+      if (!chatHistory)
+        chatHistory = await AIChat.create({ user: user._id, messages: [] });
+      chatHistory.messages.push({
+        role: "user",
+        content: message,
+        imageUrls: b2Urls,
+        timestamp: new Date(),
+      });
+      chatHistory.messages.push({
+        role: "ai",
+        content: parsed.explanation || parsed.analysis,
+        imageUrls: b2Urls,
+        isCosting: !!parsed.totalCostNGN,
+        costingData: parsed,
+        timestamp: new Date(),
+      });
+      await chatHistory.save();
+
+      return res
+        .status(200)
+        .json({ success: true, data: { ...parsed, imageUrls: b2Urls } });
+    } catch (error) {
+      console.error("AI Error:", error);
+      res
+        .status(500)
+        .json({
+          success: false,
+          error: "The Master Carpenter is analyzing. Try again.",
+        });
+    }
+  }
+);
+
+router.post(
+  "/chats",
   verifyToken,
   upload.array("images", 5),
   async (req, res) => {
