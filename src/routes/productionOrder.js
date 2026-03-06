@@ -5,15 +5,12 @@ const Notification = require("../models/Notification"); // Added Notification Mo
 const notifyUser = require("../utils/notifyUser");
 const router = express.Router();
 
-/* ───────────────────────────────
-   POST /production-order
-──────────────────────────────── */
+
 router.post("/", verifyToken, async (req, res) => {
   console.log(
     "[POST /production-order] Incoming Request Body:",
     JSON.stringify(req.body, null, 2)
   );
-
   try {
     const {
       deliveryAddress,
@@ -21,14 +18,13 @@ router.post("/", verifyToken, async (req, res) => {
       totalCostNGN,
       duration,
       explanation,
-      imageUrls, // ✅ multiple images
+      imageUrls,
       isInstalment,
     } = req.body;
 
     const user = req.user;
     console.log("[POST /production-order] Authenticated User ID:", user._id);
 
-    /* ───────── BASIC VALIDATIONS ───────── */
 
     if (!deliveryAddress || typeof deliveryAddress !== "string") {
       return res.status(400).json({
