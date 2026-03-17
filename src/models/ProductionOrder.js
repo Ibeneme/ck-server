@@ -3,10 +3,17 @@ const mongoose = require("mongoose");
 const ProductionItemSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
-    quantity: { type: Number, required: true, min: 1 },
-    unitPriceNGN: { type: Number, required: true, min: 0 },
-    subtotalNGN: { type: Number, required: true, min: 0 },
-    selectedColor: { type: String, default: "Default" },
+    images: [{ type: String }], // Array of S3/Cloudinary URLs
+    videoUri: { type: String, default: null },
+    description: { type: String, required: true },
+    duration: { type: String, default: "3 Weeks" },
+    links: [{ type: String }], // Lowercase URLs
+    quantity: {
+      type: Number,
+      default: 1,
+      min: [1, "Quantity cannot be less than 1"],
+      required: true,
+    },
   },
   { _id: false }
 );
@@ -19,7 +26,7 @@ const ProductionOrderSchema = new mongoose.Schema(
         ref: "Carpenter",
       },
     ],
-    // --- 🆕 LOGISTICS TEAM (ALL ARRAYS) ---
+
     assignedDrivers: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -45,6 +52,11 @@ const ProductionOrderSchema = new mongoose.Schema(
     },
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     deliveryAddress: { type: String, required: true },
+    BespokeOrder: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BespokeOrder",
+      // required: true,
+    },
 
     // 🔽 Images
     originalImageUri: { type: String },

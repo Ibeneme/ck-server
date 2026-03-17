@@ -7,7 +7,7 @@ const ProductionOrder = require("../../models/ProductionOrder");
 const Payment = require("../../models/Payment");
 const InteriorDecoratorProject = require("../../models/Interior_Designer/InteriorDecoratorProject");
 const InteriorDesigner = require("../../models/Interior_Designer/InteriorDesigner");
-const ProductionOrderProgress = require('../../models/ProductionOrderProgress');
+const ProductionOrderProgress = require("../../models/ProductionOrderProgress");
 const ProductionUpdate = require("../../models/ProductionUpdate");
 
 router.get("/all-data", async (req, res) => {
@@ -100,7 +100,7 @@ router.get("/all-data", async (req, res) => {
 
 router.get("/fetch/:collection/:id", async (req, res) => {
   const { collection, id } = req.params;
-
+  console.warn(collection, id, "collection, id ");
   // Use your new unified InteriorDesigner model here
   const models = {
     waitlist: Waitlist,
@@ -117,7 +117,9 @@ router.get("/fetch/:collection/:id", async (req, res) => {
   try {
     const Model = models[collection];
     if (!Model) {
-      return res.status(404).json({ success: false, message: "Invalid collection" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Invalid collection" });
     }
 
     let query = Model.findById(id);
@@ -128,7 +130,7 @@ router.get("/fetch/:collection/:id", async (req, res) => {
     if (collection === "designerProjects") {
       query = query.populate({
         path: "designerId",
-        model: "InteriorDesigner" // Reference to your new unified model
+        model: "InteriorDesigner", // Reference to your new unified model
       });
     }
 
@@ -142,7 +144,7 @@ router.get("/fetch/:collection/:id", async (req, res) => {
         // 🆕 This now links to the unified model too
         .populate({
           path: "assignedDesigners",
-          model: "InteriorDesigner"
+          model: "InteriorDesigner",
         });
     }
 
@@ -154,16 +156,21 @@ router.get("/fetch/:collection/:id", async (req, res) => {
     const item = await query.lean();
 
     if (!item) {
-      return res.status(404).json({ success: false, message: "Item not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Item not found" });
     }
 
     // 🚫 SECURITY: BLOCK UNVERIFIED USERS (Optional)
     if (collection === "users" && item.verified === false) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     // ─── ENRICH PRODUCTION ORDER DATA ───
-    const targetOrderId = collection === "orders" ? item._id : item.orderId?._id;
+    const targetOrderId =
+      collection === "orders" ? item._id : item.orderId?._id;
 
     if (targetOrderId) {
       const [progress, socialUpdates] = await Promise.all([
