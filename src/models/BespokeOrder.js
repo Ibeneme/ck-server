@@ -1,49 +1,43 @@
 const mongoose = require("mongoose");
 
+const MeasurementSchema = new mongoose.Schema({
+  label: { type: String, required: true },
+  value: { type: String, required: true },
+  unit: { type: String, enum: ["ft", "inches"], required: true },
+});
+
 const BespokeItemSchema = new mongoose.Schema({
   name: { type: String, required: true },
-  images: [{ type: String }], // Array of S3/Cloudinary URLs
+  images: [{ type: String }],
   videoUri: { type: String, default: null },
   description: { type: String, required: true },
-  duration: { type: String, default: "3 Weeks" },
-  links: [{ type: String }], // Lowercase URLs
-  quantity: { 
-    type: Number, 
-    default: 1, 
-    min: [1, 'Quantity cannot be less than 1'],
-    required: true 
-  }
+  duration: { type: String },
+  links: [{ type: String }],
+  quantity: { type: Number, default: 1, required: true },
+  measurements: [MeasurementSchema],
 });
+
 const BespokeOrderSchema = new mongoose.Schema({
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    required: true,
-  },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   items: [BespokeItemSchema],
   deliveryMode: {
     type: String,
-    enum: ["BUNDLE", "INDIVIDUAL"],
+    enum: ["BUNDLE", "INDIVIDUAL", null], 
     default: "BUNDLE",
   },
   bundleTimeline: { type: String },
-
-  // Status Management
   status: {
     type: String,
-    enum: ["pending", "priced", ],
+    enum: ["pending", "priced", "approved", "rejected"],
     default: "pending",
   },
-
-  // Admin Controls
   adminPanel: {
     feedback: { type: String, default: "" },
     estimatedCost: { type: Number, default: 0 },
-    currency: { type: String, default: "USD" },
+    currency: { type: String, default: "NGN" },
     internalNotes: { type: String, default: "" },
     reviewedAt: { type: Date },
   },
-
   createdAt: { type: Date, default: Date.now },
 });
 

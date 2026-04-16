@@ -23,6 +23,7 @@ const adminData = require("./src/routes/Admin/AdminData");
 const authCrp = require("./src/routes/Carpenters/Carpenter_Auth");
 const generateImageRouter = require("./src/routes/generateImage");
 const bespoke = require('./src/routes/bespoke')
+const measurement = require('./src/routes/measurement')
 
 app.use(cors());
 app.use(express.json());
@@ -53,6 +54,8 @@ app.use("/api/v1/admin/data", adminData);
 app.use("/api/v1/auth/carpenter", authCrp);
 app.use("/api/v1/ai-bot", generateImageRouter);
 app.use("/api/v1/bespoke", bespoke);
+app.use("/api/v1/measurement", measurement);
+
 app.get("/", (req, res) => {
   res.send("CloneKraft API running 🚀");
 });

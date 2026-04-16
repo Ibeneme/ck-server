@@ -92,35 +92,40 @@ router.post("/pay", verifyToken, async (req, res) => {
 // ───── GET: Verify Payment ─────
 router.get("/verify/:reference", verifyToken, async (req, res) => {
   const { reference } = req.params;
-  log(`Verifying transaction. Ref: ${reference}`);
+  console.log("--------------------------------------------------");
+  console.log(`[VERIFY START] Reference: ${reference}`);
+  console.log("--------------------------------------------------");
 
   try {
     if (!reference) {
-      console.warn("[Verify] No reference provided in params.");
+      console.warn("[Verify] ❌ No reference provided in params.");
       return res.status(400).json({ error: "Missing reference" });
     }
 
+    console.log("[Verify] Checking database for payment record...");
     const paymentRecord = await Payment.findOne({
       paymentReference: reference,
     });
 
     if (!paymentRecord) {
-      console.error("[Verify] Reference not found in Payment collection.");
+      console.error(`[Verify] ❌ Reference ${reference} not found in Payment collection.`);
       return res.status(404).json({ error: "Payment record not found" });
     }
+
+    console.log(`[Verify] Found Record. Current Status in DB: ${paymentRecord.paymentStatus}`);
 
     if (
       paymentRecord.paymentStatus === "paid" ||
       paymentRecord.paymentStatus === "success"
     ) {
-      console.log("[Verify] Already verified. Skipping duplicate logic.");
+      console.log("[Verify] ✅ Transaction already verified in DB. Skipping Paystack API call.");
       const order = await ProductionOrder.findById(paymentRecord.orderId);
       return res
         .status(200)
         .json({ success: true, message: "Already verified", order });
     }
 
-    console.log("[Verify] Requesting status from Paystack API...");
+    console.log("[Verify] 🛰️ Requesting verification from Paystack API...");
     const response = await axios.get(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
@@ -129,29 +134,29 @@ router.get("/verify/:reference", verifyToken, async (req, res) => {
     );
 
     const paymentData = response.data.data;
-    console.log(`[Verify] Paystack Response Status: ${paymentData.status}`);
+    console.log(`[Verify] Paystack API Response Status: ${paymentData.status}`);
 
     if (paymentData.status !== "success") {
-      console.warn("[Verify] Transaction failed at Paystack.");
+      console.warn(`[Verify] ⚠️ Paystack reported status: ${paymentData.status}. Terminating.`);
       return res
         .status(400)
         .json({ success: false, error: "Transaction failed" });
     }
 
+    console.log("[Verify] Fetching linked Production Order...");
     const order = await ProductionOrder.findById(paymentRecord.orderId);
     if (!order) {
-      console.error("[Verify] Order linked to payment no longer exists.");
+      console.error(`[Verify] ❌ Order ${paymentRecord.orderId} not found.`);
       return res.status(404).json({ error: "Order not found" });
     }
 
     const amountPaidInThisTrx = paymentData.amount / 100;
-    console.log(`[Verify] Amount Paid: ₦${amountPaidInThisTrx}`);
+    console.log(`[Verify] 💰 Amount Paid in this TRX: ₦${amountPaidInThisTrx}`);
+    console.log(`[Verify] Order Pre-update: Paid=₦${order.amountPaid}, Balance=₦${order.balanceRemaining}`);
 
     // Status Transition Logic
     if (order.amountPaid === 0 || order.status === "pending") {
-      console.log(
-        "[Verify] First payment detected. Moving order to 'in_progress'."
-      );
+      console.log("[Verify] 🆕 First payment detected. Transitioning order to 'in_progress'.");
       order.status = "in_progress";
       order.duration = "5 days";
       order.createdAt = new Date();
@@ -162,14 +167,12 @@ router.get("/verify/:reference", verifyToken, async (req, res) => {
     if (order.balanceRemaining < 0) order.balanceRemaining = 0;
 
     if (order.balanceRemaining <= 0) {
-      console.log("[Verify] Order fully paid.");
+      console.log("[Verify] 🏆 Order now FULLY PAID.");
       order.paymentStatus = "paid";
       order.isFullPaid = true;
       order.isInstalmentPaid = false;
     } else {
-      console.log(
-        `[Verify] Partial payment. Balance left: ₦${order.balanceRemaining}`
-      );
+      console.log(`[Verify] 💵 Partial payment. New Balance: ₦${order.balanceRemaining}`);
       order.paymentStatus = "partial";
       order.isInstalment = true;
       order.isInstalmentPaid = true;
@@ -177,24 +180,24 @@ router.get("/verify/:reference", verifyToken, async (req, res) => {
 
     order.paidAt = new Date(paymentData.paid_at);
     order.paymentReference = reference;
+    
+    console.log("[Verify] Saving Order and Payment updates to DB...");
     await order.save();
 
     paymentRecord.paymentStatus = "paid";
     paymentRecord.paymentDetails = paymentData;
     paymentRecord.paidAt = new Date(paymentData.paid_at);
     await paymentRecord.save();
+    console.log("[Verify] DB Update Successful.");
 
     // 🚀 NOTIFICATION LOGIC
     const isFullPayment = order.balanceRemaining <= 0;
-    const notificationTitle = isFullPayment
-      ? "Payment Received!"
-      : "Payment Received!";
+    const notificationTitle = "Payment Received!";
     const notificationBody = isFullPayment
       ? `Payment of ₦${amountPaidInThisTrx.toLocaleString()} was successful. Your order is now fully paid and our team is finalizing production!`
       : `Payment of ₦${amountPaidInThisTrx.toLocaleString()} confirmed. Your remaining balance is ₦${order.balanceRemaining.toLocaleString()}.`;
 
-    console.log("[Notification] Saving payment alert to DB history...");
-    // 💾 Store in Notification Schema
+    console.log(`[Notification] Creating history for user: ${order.user}`);
     await Notification.create({
       user: order.user,
       title: notificationTitle,
@@ -208,8 +211,7 @@ router.get("/verify/:reference", verifyToken, async (req, res) => {
       },
     });
 
-    console.log("[Notification] Sending real-time alert...");
-    // 🚀 Trigger Real-time Notification
+    console.log("[Notification] Sending real-time push alert...");
     await notifyUser({
       userId: order.user,
       title: notificationTitle,
@@ -218,15 +220,16 @@ router.get("/verify/:reference", verifyToken, async (req, res) => {
       type: "ORDER_PAID",
     });
 
-    log(
-      `Verification Complete: Ref ${reference}. New Order Status: ${order.status}`
-    );
+    console.log(`[VERIFY COMPLETE] ✅ Order ${order._id} status is now: ${order.status}`);
+    console.log("--------------------------------------------------");
 
     res.status(200).json({ success: true, message: "Payment verified", order });
   } catch (error) {
-    log("Verification error:", error.message);
+    console.error("--------------------------------------------------");
+    console.error("[VERIFY CRASH] ❌ Error stack below:");
+    console.error(error);
+    console.error("--------------------------------------------------");
     res.status(500).json({ success: false, error: "Verification failed" });
   }
 });
-
 module.exports = router;

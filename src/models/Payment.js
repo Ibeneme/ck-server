@@ -7,10 +7,10 @@ const PaymentSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    // 🛠️ Changed to required: false to allow for Site Mapping/Measurement fees
     orderId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "ProductionOrder",
-      required: true,
+      required: false,
     },
     amountPaidNGN: {
       type: Number,
@@ -31,10 +31,14 @@ const PaymentSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ["pending", "partial", "paid", "failed"],
+      enum: ["pending", "partial", "paid", "failed", "success"],
       default: "pending",
     },
-    // To store the full response from Paystack after verification
+    // 🆕 Added metadata to distinguish between PRODUCTION and MEASUREMENT
+    metadata: {
+      type: Object,
+      default: {},
+    },
     paymentDetails: {
       type: Object,
       default: {},

@@ -76,11 +76,15 @@ router.delete("/admin/:id", verifyToken, async (req, res) => {
 router.post("/create", verifyToken, upload.any(), async (req, res) => {
   try {
     const userId = req.user._id;
-    let { items, deliveryMode, bundleTimeline } = req.body;
+    // Extract fields from body
+    let { items, deliveryMode, bundleTimeline, globalTimeline } = req.body;
+
     if (typeof items === "string") items = JSON.parse(items);
 
-    if (!items || items.length === 0)
-      return res.status(400).json({ message: "No items provided." });
+    // FIX: Provide a default if deliveryMode is missing (undefined)
+    // We use "BUNDLE" as the default since the new UI ships items together.
+    const finalDeliveryMode = deliveryMode || "BUNDLE";
+    const finalTimeline = bundleTimeline || globalTimeline;
 
     const processedItems = await Promise.all(
       items.map(async (item, index) => {
@@ -102,21 +106,27 @@ router.post("/create", verifyToken, upload.any(), async (req, res) => {
           if (file.mimetype.startsWith("video")) itemVideo = uploadedUrl;
           else itemImages.push(uploadedUrl);
         }
-        return { ...item, images: itemImages, videoUri: itemVideo };
+        return {
+          ...item,
+          images: itemImages,
+          videoUri: itemVideo,
+          measurements: item.measurements || [],
+        };
       })
     );
 
     const newOrder = new BespokeOrder({
       userId,
       items: processedItems,
-      deliveryMode,
-      bundleTimeline,
+      deliveryMode: finalDeliveryMode, // Use the fallback here
+      bundleTimeline: finalTimeline,
       status: "pending",
     });
 
     await newOrder.save();
     res.status(201).json({ success: true, data: newOrder });
   } catch (error) {
+    console.error("Error creating bespoke order:", error);
     res
       .status(500)
       .json({ message: "Failed to process request", error: error.message });
@@ -187,7 +197,6 @@ router.patch("/update/:id", verifyToken, async (req, res) => {
     res.status(500).json({ message: "Update failed" });
   }
 });
-
 
 router.patch("/admin/price-update/:id", async (req, res) => {
   try {

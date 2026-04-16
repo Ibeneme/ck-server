@@ -5,7 +5,7 @@ const ProductionItemSchema = new mongoose.Schema(
     name: { type: String, required: true },
     images: [{ type: String }], // Array of S3/Cloudinary URLs
     videoUri: { type: String, default: null },
-    description: { type: String, required: true },
+    description: { type: String, },
     duration: { type: String, default: "3 Weeks" },
     links: [{ type: String }], // Lowercase URLs
     quantity: {
