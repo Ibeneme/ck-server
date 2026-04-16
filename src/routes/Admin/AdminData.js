@@ -9,26 +9,26 @@ const InteriorDecoratorProject = require("../../models/Interior_Designer/Interio
 const InteriorDesigner = require("../../models/Interior_Designer/InteriorDesigner");
 const ProductionOrderProgress = require("../../models/ProductionOrderProgress");
 const ProductionUpdate = require("../../models/ProductionUpdate");
-
+const OnsiteMeasurement = require("../../models/RequestOnsite");
 router.get("/all-data", async (req, res) => {
   console.log(
-    "🚀 [Admin Dashboard]: Fetching all data with Unified Designer Model..."
+    "🚀 [Admin Dashboard]: Fetching all data with Unified Designer Model & Onsite Measurements..."
   );
   try {
     const [
       waitlist,
       carpenters,
-      designers, // Now using InteriorDesigner model
+      designers,
       suppliers,
       drivers,
       users,
       rawOrders,
       payments,
       designerProjects,
+      onsite, // 🆕 Added Onsite Measurement
     ] = await Promise.all([
       Waitlist.find().sort({ joinedAt: -1 }),
       Carpenter.find().sort({ createdAt: -1 }),
-      // 🆕 Fetching from unified InteriorDesigner collection
       InteriorDesigner.find().sort({ createdAt: -1 }),
       Supplier.find().sort({ createdAt: -1 }),
       Driver.find().sort({ createdAt: -1 }),
@@ -38,15 +38,17 @@ router.get("/all-data", async (req, res) => {
         .populate("assignedCarpenters")
         .populate("assignedDrivers")
         .populate("assignedSuppliers")
-        // 🆕 Populate designers in orders using the new model ref
         .populate({ path: "assignedDesigners", model: "InteriorDesigner" })
         .sort({ createdAt: -1 }),
       Payment.find()
         .populate("user", "firstName lastName")
         .sort({ createdAt: -1 }),
-      // 🆕 Hydrate the designer info for the project table
       InteriorDecoratorProject.find()
         .populate({ path: "designerId", model: "InteriorDesigner" })
+        .sort({ createdAt: -1 }),
+      // 🆕 Fetching Onsite Measurements and hydrating user info
+      OnsiteMeasurement.find()
+        .populate("userId", "firstName lastName email profilePicture")
         .sort({ createdAt: -1 }),
     ]);
 
@@ -79,6 +81,7 @@ router.get("/all-data", async (req, res) => {
         orders: orders.length,
         payments: payments.length,
         designerProjects: designerProjects.length,
+        onsite: onsite.length, // 🆕 Included in counts
       },
       data: {
         waitlist,
@@ -90,6 +93,7 @@ router.get("/all-data", async (req, res) => {
         orders,
         payments,
         designerProjects,
+        onsite, // 🆕 Included in data
       },
     });
   } catch (err) {
@@ -100,18 +104,19 @@ router.get("/all-data", async (req, res) => {
 
 router.get("/fetch/:collection/:id", async (req, res) => {
   const { collection, id } = req.params;
-  console.warn(collection, id, "collection, id ");
-  // Use your new unified InteriorDesigner model here
+  console.warn(`🚀 [Admin Fetch]: Fetching from ${collection} with ID: ${id}`);
+
   const models = {
     waitlist: Waitlist,
     carpenters: Carpenter,
-    designers: InteriorDesigner, // 🆕 Pointing to unified model
+    designers: InteriorDesigner,
     suppliers: Supplier,
     drivers: Driver,
     users: User,
     orders: ProductionOrder,
     payments: Payment,
     designerProjects: InteriorDecoratorProject,
+    onsite: OnsiteMeasurement, // 🆕 Added Onsite Measurement model
   };
 
   try {
@@ -126,29 +131,33 @@ router.get("/fetch/:collection/:id", async (req, res) => {
 
     // ─── MASTER POPULATION LOGIC ───
 
-    // 🆕 Simplified: Populate Designer directly from the unified collection
+    // 🆕 Populate User for Onsite Measurements
+    if (collection === "onsite") {
+      query = query.populate(
+        "userId",
+        "firstName lastName email phoneNumber profilePicture"
+      );
+    }
+
     if (collection === "designerProjects") {
       query = query.populate({
         path: "designerId",
-        model: "InteriorDesigner", // Reference to your new unified model
+        model: "InteriorDesigner",
       });
     }
 
-    // Standard population for Production Orders
     if (collection === "orders") {
       query = query
         .populate("user", "firstName lastName email profilePicture")
         .populate("assignedCarpenters")
         .populate("assignedDrivers")
         .populate("assignedSuppliers")
-        // 🆕 This now links to the unified model too
         .populate({
           path: "assignedDesigners",
           model: "InteriorDesigner",
         });
     }
 
-    // Standard population for Payments
     if (collection === "payments") {
       query = query.populate("user").populate("orderId");
     }
@@ -161,7 +170,7 @@ router.get("/fetch/:collection/:id", async (req, res) => {
         .json({ success: false, message: "Item not found" });
     }
 
-    // 🚫 SECURITY: BLOCK UNVERIFIED USERS (Optional)
+    // 🚫 SECURITY: BLOCK UNVERIFIED USERS
     if (collection === "users" && item.verified === false) {
       return res
         .status(404)

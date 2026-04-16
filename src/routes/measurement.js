@@ -167,4 +167,47 @@ router.get("/my-requests", verifyToken, async (req, res) => {
   }
 });
 
+// ───── PATCH: Mark Onsite Measurement as Completed ─────
+router.patch("/complete/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+  
+      // 1. Find the request
+      const measurement = await OnsiteMeasurement.findById(id);
+  
+      if (!measurement) {
+        return res.status(404).json({ success: false, error: "Request not found." });
+      }
+  
+      // 2. Strict validation: Only 'scheduled' can move to 'completed'
+      if (measurement.status !== "scheduled") {
+        return res.status(400).json({ 
+          success: false, 
+          error: `Cannot complete request. Current status is '${measurement.status}', but it must be 'scheduled'.` 
+        });
+      }
+  
+      // 3. Update status
+      measurement.status = "completed";
+      measurement.completedAt = new Date(); // Good for records
+      await measurement.save();
+  
+      // 4. Notify the user
+      await notifyUser({
+        userId: measurement.userId,
+        title: "Measurement Completed! 📐",
+        description: `Your onsite measurement for ${measurement.address} has been marked as completed.`,
+        type: "MEASUREMENT_COMPLETED",
+      });
+  
+      res.status(200).json({
+        success: true,
+        message: "Status updated to completed.",
+        data: measurement,
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
 module.exports = router;
